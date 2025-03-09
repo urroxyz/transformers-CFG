@@ -111,13 +111,11 @@ The `transformers-cfg-cli` tool enables text generation using a model and a spec
 
 ```bash
 transformers-cfg-cli generate \
-    -m "microsoft/Phi-3-mini-4k-instruct" \
-    -g "examples/grammars/json.ebnf" \
-    -p "This is a valid JSON string for an HTTP request:" \
-    --use_4bit \
-    --max_new_tokens 60 \
-    --repetition_penalty 1.1
-# {"name":"John","age":30,"car":null}
+    -m "facebook/opt-125m" \
+    -g "examples/grammars/animal.ebnf" \
+    -p 'The text says, "The animal is a dog." The answer is obvious.' \
+    --max_new_tokens 50 \
+# The animal is a cat.
 ```
 
 Run `transformers-cfg-cli generate --help` for available options.
@@ -131,37 +129,39 @@ from transformers_cfg.grammar_utils import IncrementalGrammarConstraint
 from transformers_cfg.generation.logits_process import GrammarConstrainedLogitsProcessor
 
 if __name__ == "__main__":
-    # Detect if GPU is available, otherwise use CPU
+    # Set device: use GPU if available, else CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # Model identifier
     model_id = "facebook/opt-125m"
 
     # Load model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
-
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     model.generation_config.pad_token_id = model.generation_config.eos_token_id
 
     # Define grammar string
-    json_grammar = """
-
+    grammar_str = """
     root   ::= "The animal is a " animal "."
-
     animal ::= "cat" | "fish"
-
     """
     
-    grammar = IncrementalGrammarConstraint(json_grammar, "root", tokenizer)
+    # Create grammar constraint and logits processor
+    grammar = IncrementalGrammarConstraint(grammar_str, "root", tokenizer)
     grammar_processor = GrammarConstrainedLogitsProcessor(grammar)
 
-    # Generate
+    # Define prompts
     prompts = [
-        'The text says, "The animal is a dog." The answer is obvious. ', 'I\'m going to say "The animal is a dog." Here I go! '
-              ]
+        'The text says, "The animal is a dog." The answer is obvious.',
+        'I\'m going to say "The animal is a dog." Here I go!'
+    ]
+    
+    # Tokenize prompts
     input_ids = tokenizer(prompts, add_special_tokens=False, return_tensors="pt", padding=True)["input_ids"].to(device)
 
+    # Generate constrained text
     output = model.generate(
         input_ids,
         max_length=50,
@@ -170,13 +170,12 @@ if __name__ == "__main__":
         num_return_sequences=1,
     )
     
-    # Decode output
+    # Decode and print generated text
     generations = tokenizer.batch_decode(output, skip_special_tokens=True)
-
-    # Print all generations in for loop
     for generation in generations:
         print(generation)
 
+# The animal is a cat.
 ```
 
 #### Stream
@@ -190,41 +189,42 @@ from transformers_cfg.grammar_utils import IncrementalGrammarConstraint
 from transformers_cfg.generation.logits_process import GrammarConstrainedLogitsProcessor
 
 if __name__ == "__main__":
-    # Detect if GPU is available, otherwise use CPU
+    # Set device: use GPU if available, else CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # Model identifier
     model_id = "facebook/opt-125m"
 
     # Load model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
-
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     model.generation_config.pad_token_id = model.generation_config.eos_token_id
 
-    # Define grammar as a string
+    # Define grammar string
     grammar_str = """
-
     root   ::= "The animal is a " animal "."
-
     animal ::= "cat" | "fish"
-
     """
     
+    # Create grammar constraint and logits processor
     grammar = IncrementalGrammarConstraint(grammar_str, "root", tokenizer)
     grammar_processor = GrammarConstrainedLogitsProcessor(grammar)
 
-    # Generate
+    # Define prompt
     prompts = [
-        'The text says, "The animal is a dog." The answer is obvious. ', #'I\'m going to say "The animal is a dog." Here I go! '
-              ]
+        'The text says, "The animal is a dog." The answer is obvious.'
+    ]
+    
+    # Tokenize prompt
     input_ids = tokenizer(prompts, add_special_tokens=False, return_tensors="pt", padding=True)["input_ids"].to(device)
 
     # Set up streaming
     streamer = TextStreamer(tokenizer)
 
-    output = model.generate(
+    # Generate constrained text with streaming.
+    model.generate(
         input_ids,
         max_length=50,
         logits_processor=[grammar_processor],
@@ -233,6 +233,7 @@ if __name__ == "__main__":
         streamer=streamer
     )
 
+# The animal is a cat.
 ```
 
 </details>
@@ -247,30 +248,26 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from transformers_cfg.grammar_utils import IncrementalGrammarConstraint
 from transformers_cfg.generation.logits_process import GrammarConstrainedLogitsProcessor
 
-# Load model and tokenizer
+# Model identifier
 model_id = "facebook/opt-125m"
 
+# Load model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 tokenizer.pad_token = tokenizer.eos_token
-
-# Detect if GPU is available, otherwise use CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
 
 # Define grammar string
-json_grammar = """
-
+grammar_str = """
 root   ::= "The animal is a " animal "."
-
 animal ::= "cat" | "fish"
-
 """
 
-grammar = IncrementalGrammarConstraint(json_grammar, "root", tokenizer)
+# Create grammar constraint and logits processor
+grammar = IncrementalGrammarConstraint(grammar_str, "root", tokenizer)
 grammar_processor = GrammarConstrainedLogitsProcessor(grammar)
 
-# Initialize pipeline
+# Initialize text generation pipeline
 pipe = pipeline(
     "text-generation",
     model=model,
@@ -280,20 +277,25 @@ pipe = pipeline(
     batch_size=2,
 )
 
-# Generate text
+# Define prompts
+prompts = [
+    'The text says, "The animal is a dog." The answer is obvious.',
+    'I\'m going to say "The animal is a dog." Here I go!'
+]
+
+# Generate constrained text using the pipeline.
 generations = pipe(
-    [
-        'The text says, "The animal is a dog." The answer is obvious. ',
-        'I\'m going to say "The animal is a dog." Here I go! '
-    ],
+    prompts,
     do_sample=False,
     logits_processor=[grammar_processor],
 )
 
-# Print results
+# Print generated texts
 for generation_group in generations:
     for generation in generation_group:
         print(generation['generated_text'])
+
+# The animal is a cat.
 ```
 
 </details>
@@ -342,6 +344,7 @@ response = model.create_completion(
 # Print generated text.
 print(response["choices"][0]["text"])
 
+# The animal is a cat.
 ```
 
 #### Stream
@@ -390,6 +393,7 @@ response = model.create_completion(
 for token in response:
     print(token["choices"][0]["text"], end="", flush=True)
 
+# The animal is a cat.
 ```
 
 </details>
@@ -416,14 +420,14 @@ Learn to create grammars for complex JSON objects in our [documentation](example
 <details>  
 <summary>Qwen (≤ 2.5)</summary>  
   
-- [Qwen](https://huggingface.co/collections/Qwen/qwen2-6659360b33528ced941e557f) ≤ 2.5  
+- [Qwen2](https://huggingface.co/collections/Qwen/qwen2-6659360b33528ced941e557f)
+- [Qwen2.5]()
 
 </details>  
 
 <details>  
 <summary>LLaMa (≤ 3.3)</summary>  
 
-- [LLaMa](https://huggingface.co/baffo32/decapoda-research-llama-7B-hf) ≤ 3.0  
 - [huggyllama/llama-7b](https://huggingface.co/huggyllama/llama-7b)  
 - [TinyPixel/Llama-2-7B-bf16-sharded](https://huggingface.co/TinyPixel/Llama-2-7B-bf16-sharded)  
 - [OpenAssistant/llama2-13b-orca-8k-3319](https://huggingface.co/OpenAssistant/llama2-13b-orca-8k-3319)  
@@ -476,7 +480,6 @@ Learn to create grammars for complex JSON objects in our [documentation](example
 <details>  
 <summary>OPT</summary>  
 
-- [OPT](https://huggingface.co/collections/facebook/opt-66ed00e15599f02966818844)  
 - [facebook/opt-125m](https://huggingface.co/facebook/opt-125m)  
 - [facebook/opt-2.7b](https://huggingface.co/facebook/opt-2.7b)  
 - [facebook/opt-350m](https://huggingface.co/facebook/opt-350m)  
