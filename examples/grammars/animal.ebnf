@@ -1,0 +1,3 @@
+root   ::= "The animal is a " animal "."
+
+animal ::= "cat" | "fish"
