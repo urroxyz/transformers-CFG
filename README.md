@@ -7,27 +7,35 @@
 
 ### Latest experimental
 
+#### **Features**
+
 <details>
 
-#### **Features**
 - LlamaCPP Python wrapper support ([#116](https://github.com/epfl-dlab/transformers-CFG/pull/116))
 
+</details>
+
 #### **Bug fixes**
+
+<details>
+
 - `pip show` license ([#117](https://github.com/epfl-dlab/transformers-CFG/pull/117))
 
 </details>
 
 ### Latest stable
-#### **[v0.2.7 Latest](https://github.com/epfl-dlab/transformers-CFG/releases/tag/v0.2.7)** (2025-03-02)
+#### **[v0.2.7](https://github.com/epfl-dlab/transformers-CFG/releases/tag/v0.2.7)** (2025-03-02)
 
 #### **Features**
 
 - Types and MLX ([#93](https://github.com/epfl-dlab/transformers-CFG/pull/93))
-- Negation, wildcards, repetition brackets ([#94](https://github.com/epfl-dlab/transformers-CFG/pull/94), [#95](https://github.com/epfl-dlab/transformers-CFG/pull/95), [#96](https://github.com/epfl-dlab/transformers-CFG/pull/96), [#104](https://github.com/epfl-dlab/transformers-CFG/pull/104))
+- Negation ([#94](https://github.com/epfl-dlab/transformers-CFG/pull/94))
+- Wildcards ([#95](https://github.com/epfl-dlab/transformers-CFG/pull/95))
+- Repetition brackets ([#96](https://github.com/epfl-dlab/transformers-CFG/pull/96), [#104](https://github.com/epfl-dlab/transformers-CFG/pull/104))
 - Qwen2 and Qwen2.5 ([#97](https://github.com/epfl-dlab/transformers-CFG/pull/97))
-- Resuable `GrammarConstrainedLogitsProcessor` for efficiency ([#100](https://github.com/epfl-dlab/transformers-CFG/pull/100))
-- Pytest for testing ([#109](https://github.com/epfl-dlab/transformers-CFG/pull/109))
-- GitHub Actions workflow for automation ([#110](https://github.com/epfl-dlab/transformers-CFG/pull/110))
+- Resuable logits processor ([#100](https://github.com/epfl-dlab/transformers-CFG/pull/100))
+- Pytest ([#109](https://github.com/epfl-dlab/transformers-CFG/pull/109))
+- GitHub Actions workflow ([#110](https://github.com/epfl-dlab/transformers-CFG/pull/110))
 
 #### **Bug fixes**
 
@@ -70,6 +78,29 @@ For the latest updates, install directly from GitHub:
 ```bash
 pip install git+https://github.com/epfl-dlab/transformers-CFG.git@main
 ```
+
+## 💡 Why use `transformers-cfg`?
+
+- **EBNF Grammar Support**: Uses Extended Backus-Naur Form (EBNF) for grammar description.
+- **Seamless Integration**: Compatible with the llama-cpp project for easy replacement.
+- **Broad Model Compatibility**: Works with all models in the 🤗 Transformers library.
+- **Multilingual Grammar Support**: Enables grammars in various languages, including Chinese (中文), Japanese (日本語), Korean (한국어), Hindi (हिन्दी), Hebrew (עברית), Arabic (العربية), and emoji (🤗).  
+
+## 🤔 What is a grammar?
+
+Think of it as an enhanced version of regular expressions.
+
+### Valid JSON object
+
+```bnf
+root ::= object
+object ::= "{" pair ("," pair)* "}"
+pair ::= string ":" value
+string ::= '"' [a-zA-Z0-9]* '"'
+value ::= string | object | "true" | "false" | "null"
+```
+
+For advanced grammar debugging, see our [debugging guide](docs/debugging_custom_grammars.md).
 
 ## 🔧 Grammar quickstart
 Let's set up a predictable generation method where the model would usually reply with "The animal is a dog." However, we'll force the model to say either "The animal is a cat" or "The animal is a fish," two other common domestic pets that contradict the inital text.
@@ -272,7 +303,6 @@ Use the `llama-cpp-python` adapter, automatically loadable with the `adapter` pa
 
 ```py
 import io
-import torch
 import logging
 from contextlib import redirect_stderr
 from llama_cpp import Llama
@@ -282,31 +312,73 @@ from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO)
 
-# Define your EBNF grammar (you can replace this with your own)
-ebnf_grammar = """
+# Define grammar string.
+grammar_str = """
+root   ::= "The animal is a " animal "."
+animal ::= "cat" | "fish"
+"""
 
-    root   ::= "The animal is a " animal "."
+# Load the tokenizer matching the model.
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5b")
 
-    animal ::= "cat" | "fish"
+# Redirect stderr and load the model via llama-cpp-python.
+with redirect_stderr(io.StringIO()):
+    model = Llama(model_path="qwen2.5-1.5b-q8_0.gguf", n_ctx=8000, verbose=False)
 
-    """
+# Create grammar constraint and logits processor using the adapter.
+grammar = IncrementalGrammarConstraint(grammar_str, "root", tokenizer)
+grammar_processor = GrammarConstrainedLogitsProcessor(grammar, adapter="llama-cpp-python")
 
-# Load the tokenizer matching your model
+# Define prompt.
+prompt = 'The text says, "The animal is a dog." The answer is obvious.'
+
+# Generate constrained text (non-streaming).
+response = model.create_completion(
+    prompt=prompt,
+    logits_processor=[grammar_processor],
+    max_tokens=100,
+)
+
+# Print generated text.
+print(response["choices"][0]["text"])
+
+```
+
+#### Stream
+<details>
+
+```py
+import io
+import logging
+from contextlib import redirect_stderr
+from llama_cpp import Llama
+from transformers_cfg.grammar_utils import IncrementalGrammarConstraint
+from transformers_cfg.generation.logits_process import GrammarConstrainedLogitsProcessor
+from transformers import AutoTokenizer
+
+logging.basicConfig(level=logging.INFO)
+
+# Define grammar string
+grammar_str = """
+root   ::= "The animal is a " animal "."
+animal ::= "cat" | "fish"
+"""
+
+# Load the tokenizer matching the model
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-1.5b")
 
 # Redirect stderr and load the model via llama-cpp-python
-f = io.StringIO()
-with redirect_stderr(f):
+with redirect_stderr(io.StringIO()):
     model = Llama(model_path="qwen2.5-1.5b-q8_0.gguf", n_ctx=8000, verbose=False)
 
-# Create the grammar constraint and the logits processor with the new parameter.
-grammar_constraint = IncrementalGrammarConstraint(ebnf_grammar, "root", tokenizer)
-grammar_processor = GrammarConstrainedLogitsProcessor(grammar_constraint, adapter="llama-cpp-python")
+# Create grammar constraint and logits processor using the adapter
+grammar = IncrementalGrammarConstraint(grammar_str, "root", tokenizer)
+grammar_processor = GrammarConstrainedLogitsProcessor(grammar, adapter="llama-cpp-python")
 
-# Define a prompt.
-prompt = """The text says, "The animal is a dog." The answer is obvious. """
+# Define prompt.
+prompt = 'The text says, "The animal is a dog." The answer is obvious.'
 
-# Use the text completion API with the logits processor.
+# Generate constrained text with streaming
 response = model.create_completion(
     stream=True,
     prompt=prompt,
@@ -314,38 +386,13 @@ response = model.create_completion(
     max_tokens=100,
 )
 
+# Stream and print generated text
 for token in response:
-    token_text = token["choices"][0]["text"]
-    print(token_text, end="", flush=True)
+    print(token["choices"][0]["text"], end="", flush=True)
 
 ```
 
-## 💡 Why use `transformers-cfg`?
-
-- **EBNF Grammar Support**: Uses Extended Backus-Naur Form (EBNF) for grammar description.
-- **Seamless Integration**: Compatible with the llama-cpp project for easy replacement.
-- **Broad Model Compatibility**: Works with all models in the 🤗 Transformers library.
-- **Multilingual Grammar Support**: Enables grammars in various languages, including Chinese (中文), Japanese (日本語), Korean (한국어), Hindi (हिन्दी), Hebrew (עברית), Arabic (العربية), and emoji (🤗).  
-
-## 🤔 What is a grammar?
-
-Think of it as an enhanced version of regular expressions.
-
-### Valid JSON object
-
-```bnf
-root ::= object
-object ::= "{" pair ("," pair)* "}"
-pair ::= string ":" value
-string ::= '"' [a-zA-Z0-9]* '"'
-value ::= string | object | "true" | "false" | "null"
-```
-
-For advanced grammar debugging, see our [debugging guide](docs/debugging_custom_grammars.md).
-
-## 🛠 JSON schema
-
-Learn to create grammars for complex JSON objects in our [documentation](examples/grammars/custom_json_grammars/README.md).
+</details>
 
 ## 📜 Grammar collection
 
@@ -357,19 +404,24 @@ We maintain a collection of grammars in `examples/grammars`, aligned with llama-
 - [chess.ebnf](examples/grammars/chess.ebnf): Valid chess moves.
 - [arithmetic.ebnf](examples/grammars/arithmetic.ebnf): Valid arithmetic expressions.
 
-## ✅ Supported models
+## 🛠 JSON schema
 
-### Qwen  
+Learn to create grammars for complex JSON objects in our [documentation](examples/grammars/custom_json_grammars/README.md).
+
+## ✅ Supported tokenizers
+
+
+### 🤖 Tested models
+
 <details>  
-<summary>Qwen</summary>  
+<summary>Qwen (≤ 2.5)</summary>  
   
 - [Qwen](https://huggingface.co/collections/Qwen/qwen2-6659360b33528ced941e557f) ≤ 2.5  
 
 </details>  
 
-### Meta (LLaMa)  
 <details>  
-<summary>Meta (LLaMa)</summary>  
+<summary>LLaMa (≤ 3.3)</summary>  
 
 - [LLaMa](https://huggingface.co/baffo32/decapoda-research-llama-7B-hf) ≤ 3.0  
 - [huggyllama/llama-7b](https://huggingface.co/huggyllama/llama-7b)  
@@ -393,11 +445,9 @@ We maintain a collection of grammars in `examples/grammars`, aligned with llama-
 
 </details>  
 
-### GPT  
 <details>  
-<summary>GPT</summary>  
+<summary>GPT (≤ 2)</summary>  
 
-- [GPT](https://huggingface.co/openai-community/gpt2) ≤ 2  
 - [gpt2](https://huggingface.co/gpt2)  
 - [distilgpt2](https://huggingface.co/distilgpt2)  
 - [openai-community/gpt2-large](https://huggingface.co/openai-community/gpt2-large)  
@@ -407,27 +457,22 @@ We maintain a collection of grammars in `examples/grammars`, aligned with llama-
 
 </details>  
 
-### Mistral  
 <details>  
-<summary>Mistral</summary>  
+<summary>Mistral (≤ 0.3)</summary>  
 
-- [Mistral](https://huggingface.co/mistralai/Mistral-7B-v0.1) ≤ 0.3  
 - [mistralai/Mistral-7B-Instruct-v0.1](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1)  
 - [mistralai/Mistral-7B-Instruct-v0.2](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2)  
 
 </details>  
 
-### Falcon  
 <details>  
-<summary>Falcon</summary>  
+<summary>Falcon (≤ 3.0)</summary>  
 
-- [Falcon](https://huggingface.co/tiiuae/falcon-7b)  
 - [tiiuae/falcon-40b-instruct](https://huggingface.co/tiiuae/falcon-40b-instruct)  
 - [tiiuae/falcon-7b-instruct](https://huggingface.co/tiiuae/falcon-7b-instruct)  
 
 </details>  
 
-### OPT  
 <details>  
 <summary>OPT</summary>  
 
@@ -439,8 +484,6 @@ We maintain a collection of grammars in `examples/grammars`, aligned with llama-
 - [facebook/opt-13b](https://huggingface.co/facebook/opt-13b)  
 
 </details>
-
-See [supported_models.yaml](docs/supported_models.yaml) for the full list whose extent is constantly being updated.
 
 If you encounter an unsupported model, please open an issue or submit a pull request.
 
